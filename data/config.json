@@ -1,0 +1,5 @@
+{
+    "accounts_count": 10,
+    "positions_per_account": 100,
+    "trades_per_account": 1000
+}
