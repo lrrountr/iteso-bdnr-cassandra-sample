@@ -1,135 +1,216 @@
-# iteso-bdnr-cassandra
+# ITESO BDNR - Cassandra Sample
 
-A place to share cassandra app code
+A sample investment portfolio application demonstrating Cassandra data modeling patterns with a REST API architecture.
 
-### Setup a python virtual env with python cassandra installed
+## Architecture
+
 ```
-# If pip is not present in your system
-sudo apt update
-sudo apt install python3-pip
-
-# Install and activate virtual env (Linux/MacOS)
-python3 -m pip install virtualenv
-python3 -m venv ./venv
-source ./venv/bin/activate
-
-# Install and activate virtual env (Windows)
-python3 -m pip install virtualenv
-python3 -m venv ./venv
-.\venv\Scripts\Activate.ps1
-
-# Install project python requirements
-pip install -r requirements.txt
-```
-
-
-### Launch cassandra container
-```
-# To start a new container
-docker run --name node01 -p 9042:9042 -d cassandra
-
-# If container already exists just start it
-docker start node01
-
-# Wait for Cassandra to be ready (10-30 seconds)
-# The app will retry connections, so it's OK to start immediately
-```
-
-### Start a Cassandra cluster with 2 nodes
-```
-# Recipe to create a cassandra cluster using docker
-docker run --name node01 -p 9042:9042 -d cassandra
-docker run --name node02 -d --link node01:cassandra cassandra
-
-# Wait for containers to be fully initialized, verify node status
-docker exec -it node01 nodetool status
-
-# Note: --link is deprecated; consider using Docker compose for production setups
+┌────────────┐       ┌────────────┐       ┌────────────┐
+│   Client   │ HTTP  │   Server   │ CQL   │ Cassandra  │
+│   (CLI)    │ ────► │ (REST API) │ ────► │ (Docker)   │
+└────────────┘       └────────────┘       └────────────┘
+     client/              server/           port 9042
 ```
 
 ## Project Structure
 
-- **app.py**: Main CLI application with argparse-based subcommands (populate, accounts, positions, trades)
-- **model.py**: Data layer with schema creation, prepared statements, batch operations, and query functions
-- **fixtures.py**: Demo data (users, instruments, configuration) - easily customizable for different dataset sizes
-- **requirements.txt**: Python dependencies with pinned versions for reproducibility
+```
+iteso-bdnr-cassandra-sample/
+├── server/
+│   ├── app.py          # Falcon application and routes
+│   ├── resources.py    # REST endpoint handlers
+│   └── model.py        # Cassandra schema and queries
+├── client/
+│   └── cli.py          # Command-line client
+├── data/
+│   ├── users.csv
+│   └── instruments.csv
+├── requirements.txt
+└── README.md
+```
 
-## Usage (CLI)
+## Data Model
 
-After starting Cassandra and installing Python deps (see above), use the CLI in `app.py`.
+Six tables, all access patterns start from a known username (like a logged-in session):
 
-- Show help:
+```
+username → accounts_by_user → account_id → positions_by_account
+                                         → trades_by_a_d   (all trades, by date)
+                                         → trades_by_a_td  (filter by type)
+                                         → trades_by_a_sd  (filter by symbol)
+                                         → trades_by_a_std (filter by symbol + type)
+```
+
+| Table | Partition Key | Purpose |
+|-------|--------------|---------|
+| `accounts_by_user` | username | List accounts for a user |
+| `positions_by_account` | account_id | Current holdings per account |
+| `trades_by_a_d` | account_id | Trade history — date range queries |
+| `trades_by_a_td` | account_id | Trade history — filter by type |
+| `trades_by_a_sd` | account_id | Trade history — filter by symbol |
+| `trades_by_a_std` | account_id | Trade history — filter by symbol + type |
+
+The API automatically selects the right trade table based on your query filters.
+
+## Setup
+
+You will need **2 terminal windows**: one for the server, one for the CLI.
+
+### Step 1: Start Cassandra
+
 ```bash
-python3 app.py --help
+docker run --name cassandra -p 9042:9042 -d cassandra
+
+# Wait ~60 seconds for Cassandra to initialize, then verify:
+docker exec -it cassandra cqlsh -e "describe cluster"
 ```
 
-- Populate demo data (creates keyspace, tables, and inserts rows):
+### Step 2: Install Dependencies
+
 ```bash
-python3 app.py populate
-```
-This will print a short summary and sample account IDs when finished.
+python3 -m venv venv
+source venv/bin/activate        # Linux/Mac
+# .\venv\Scripts\Activate.ps1   # Windows
 
-- List accounts for a user (prints `account_number` values you can use with `positions`/`trades`):
+pip install -r requirements.txt
+```
+
+### Step 3: Start the API Server
+
 ```bash
-python3 app.py accounts --username mike
+cd server
+uvicorn app:app --reload --port 5000
 ```
 
-- Show positions for an account:
+### Step 4: Create the Schema
+
 ```bash
-python3 app.py positions --account <account-id>
+cd client
+source ../venv/bin/activate
+
+python cli.py setup
 ```
 
-- Show trades for an account (optional date range):
+### Step 5: (Optional) Load Demo Data
+
 ```bash
-python3 app.py trades --account <account-id> --start 2020-01-01 --end 2020-12-31 --limit 50
+python cli.py seed --accounts 5 --trades 10
 ```
 
-Table selection:
-- The CLI automatically selects the most appropriate internal trade table based on supplied filters:
-	- If you pass both `--symbol` and `--type` it uses the symbol+type table (best for that filter).
-	- If you pass only `--symbol` it uses the symbol table.
-	- If you pass only `--type` it uses the type table.
-	- If you pass neither it uses the default recent-by-date table.
+This inserts demo data by calling the real business endpoints — the same code path as actual trades.
 
-Examples:
+## CLI Commands
+
+### Admin
+
+| Command | Description |
+|---------|-------------|
+| `status` | Check if API is running |
+| `setup` | Create keyspace and all 6 tables (DDL only) |
+| `seed --accounts N --trades N` | Insert demo data |
+
+### Portfolio Actions
+
+| Command | Description |
+|---------|-------------|
+| `accounts --username NAME` | List accounts for a user |
+| `open-account --username NAME --name NAME --balance N` | Open a new account |
+| `buy --username NAME --account ID --symbol SYM --shares N --price N` | Place a buy order |
+| `sell --username NAME --account ID --symbol SYM --shares N --price N` | Place a sell order |
+| `portfolio --account ID` | View current holdings |
+| `history --account ID [filters]` | View trade history |
+
+### Typical Session
+
 ```bash
-# Default (by date)
-python3 app.py trades --account <account-id> --limit 5
+# 1. List accounts for a user (username is always the starting point)
+python cli.py accounts --username alice
 
-# Filter by symbol -> uses symbol-backed table
-python3 app.py trades --account <account-id> --symbol ETSY --limit 10
+# 2. Open a new account
+python cli.py open-account --username alice --name "Alice's Portfolio" --balance 50000
 
-# Filter by type -> uses type-backed table
-python3 app.py trades --account <account-id> --type buy --limit 10
+# 3. Trade  (--username is required for the cash balance update)
+python cli.py buy  --username alice --account <id> --symbol AAPL --shares 10 --price 180.50
+python cli.py sell --username alice --account <id> --symbol AAPL --shares  5 --price 190.00
 
-# Filter by symbol and type -> uses symbol+type-backed table
-python3 app.py trades --account <account-id> --symbol AMZN --type sell --limit 25
+# 4. Check holdings
+python cli.py portfolio --account <id>
+
+# 5. View trade history — each filter routes to a different Cassandra table
+python cli.py history --account <id>                           # → trades_by_a_d
+python cli.py history --account <id> --symbol AAPL            # → trades_by_a_sd
+python cli.py history --account <id> --type buy               # → trades_by_a_td
+python cli.py history --account <id> --symbol AAPL --type buy # → trades_by_a_std
 ```
 
-Notes:
-- To point to a remote Cassandra cluster, use `--cluster-ips` and `--keyspace` flags.
-- The `populate` command prints a short sample of created account IDs (first 10) — use those for quick testing.
+### Trade Output
 
-## Customizing Demo Data
+Every `buy` or `sell` prints the 6 Cassandra writes it triggered:
 
-Edit `fixtures.py` to adjust the demo dataset:
+```
+Buying 10x AAPL @ $180.50  (total $1,805.00)
 
-```python
-# fixtures.py - customize these for different test scenarios:
-DEMO_USERS = [...]           # List of demo users
-DEMO_INSTRUMENTS = [...]     # Stock symbols to use
-DEMO_CONFIG = {
-    'accounts_count': 10,           # Number of accounts
-    'positions_per_account': 100,   # Total positions 
-    'trades_per_account': 1000,     # Total trades
-}
+Order executed!
+
+  Trade ID:      ...
+  Bought:        10x AAPL
+  Price:         $180.50
+  Total:         $1,805.00
+  Cash balance:  $48,195.00
+
+Cassandra writes (6):
+  [1/6] trades_by_a_d         ← all trades — date range queries
+  [2/6] trades_by_a_td        ← trades filtered by type
+  [3/6] trades_by_a_std       ← trades filtered by symbol + type
+  [4/6] trades_by_a_sd        ← trades filtered by symbol
+  [5/6] positions_by_account  ← AAPL: 0 → 10 shares
+  [6/6] accounts_by_user      ← cash: $50,000.00 → $48,195.00
 ```
 
-For example, to create a smaller dataset for quick testing:
-```python
-DEMO_CONFIG = {
-    'accounts_count': 2,
-    'positions_per_account': 10,
-    'trades_per_account': 50,
-}
+## REST API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check |
+| POST | `/setup` | Create keyspace + 6 tables (DDL only) |
+| POST | `/seed` | Insert demo data |
+| GET | `/accounts?username=X` | List accounts for a user |
+| POST | `/accounts` | Open a new account |
+| GET | `/accounts/{id}/portfolio` | Current holdings |
+| POST | `/accounts/{id}/trades` | Execute a trade (6 writes) |
+| GET | `/accounts/{id}/trades` | Trade history (routes across 4 tables) |
+
+### Example API Calls
+
+```bash
+curl http://localhost:5000/health
+curl -X POST http://localhost:5000/setup
+curl "http://localhost:5000/accounts?username=alice"
+
+curl -X POST http://localhost:5000/accounts \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "name": "Alice Portfolio", "initial_balance": 50000}'
+
+curl -X POST http://localhost:5000/accounts/<id>/trades \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "type": "buy", "symbol": "AAPL", "shares": 10, "price": 180.50}'
+
+curl "http://localhost:5000/accounts/<id>/trades?symbol=AAPL&type=buy"
 ```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_URL` | `http://localhost:5000` | API URL (client) |
+| `CASSANDRA_HOST` | `localhost` | Cassandra host (server) |
+| `CASSANDRA_PORT` | `9042` | Cassandra port (server) |
+| `CASSANDRA_KEYSPACE` | `investments` | Keyspace name (server) |
+
+## Troubleshooting
+
+**"Cannot connect to API"** — make sure the server is running: `cd server && uvicorn app:app --reload --port 5000`
+
+**"Failed to connect to Cassandra"** — wait ~60s after starting Docker, then check: `docker exec -it cassandra cqlsh -e "describe cluster"`
+
+**"Account not found"** — run `setup` first, then `seed` or `open-account`
