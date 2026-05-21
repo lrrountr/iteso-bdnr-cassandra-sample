@@ -23,7 +23,7 @@ import sys
 import requests
 from tabulate import tabulate
 
-API_URL = os.getenv('API_URL', 'http://localhost:5000')
+API_URL = os.getenv('API_URL', 'http://localhost:8001')
 
 
 def _err(msg):

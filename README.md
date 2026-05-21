@@ -79,7 +79,7 @@ pip install -r requirements.txt
 
 ```bash
 cd server
-uvicorn app:app --reload --port 5000
+uvicorn app:app --reload --port 8001
 ```
 
 ### Step 4: Create the Schema
@@ -183,33 +183,33 @@ Cassandra writes (6):
 ### Example API Calls
 
 ```bash
-curl http://localhost:5000/health
-curl -X POST http://localhost:5000/setup
-curl "http://localhost:5000/accounts?username=alice"
+curl http://localhost:8001/health
+curl -X POST http://localhost:8001/setup
+curl "http://localhost:8001/accounts?username=alice"
 
-curl -X POST http://localhost:5000/accounts \
+curl -X POST http://localhost:8001/accounts \
   -H "Content-Type: application/json" \
   -d '{"username": "alice", "name": "Alice Portfolio", "initial_balance": 50000}'
 
-curl -X POST http://localhost:5000/accounts/<id>/trades \
+curl -X POST http://localhost:8001/accounts/<id>/trades \
   -H "Content-Type: application/json" \
   -d '{"username": "alice", "type": "buy", "symbol": "AAPL", "shares": 10, "price": 180.50}'
 
-curl "http://localhost:5000/accounts/<id>/trades?symbol=AAPL&type=buy"
+curl "http://localhost:8001/accounts/<id>/trades?symbol=AAPL&type=buy"
 ```
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `API_URL` | `http://localhost:5000` | API URL (client) |
+| `API_URL` | `http://localhost:8001` | API URL (client) |
 | `CASSANDRA_HOST` | `localhost` | Cassandra host (server) |
 | `CASSANDRA_PORT` | `9042` | Cassandra port (server) |
 | `CASSANDRA_KEYSPACE` | `investments` | Keyspace name (server) |
 
 ## Troubleshooting
 
-**"Cannot connect to API"** — make sure the server is running: `cd server && uvicorn app:app --reload --port 5000`
+**"Cannot connect to API"** — make sure the server is running: `cd server && uvicorn app:app --reload --port 8001`
 
 **"Failed to connect to Cassandra"** — wait ~60s after starting Docker, then check: `docker exec -it cassandra cqlsh -e "describe cluster"`
 
